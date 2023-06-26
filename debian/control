@@ -1,0 +1,28 @@
+Source: libipc-bash-perl
+Maintainer: lenovo <lenovo@>
+Section: perl
+Priority: optional
+Build-Depends: debhelper-compat (= 13)
+Build-Depends-Indep: libbytes-random-secure-perl <!nocheck>,
+                     libfile-util-tempdir-perl <!nocheck>,
+                     libmoose-perl <!nocheck>,
+                     libmoosex-privacy-perl <!nocheck>,
+                     libmutex-perl <!nocheck>,
+                     perl
+Standards-Version: 4.6.2
+Homepage: https://metacpan.org/release/IPC-Bash
+Rules-Requires-Root: no
+
+Package: libipc-bash-perl
+Architecture: all
+Depends: ${misc:Depends},
+         ${perl:Depends},
+         libbytes-random-secure-perl,
+         libfile-util-tempdir-perl,
+         libmoose-perl,
+         libmoosex-privacy-perl,
+         libmutex-perl
+Description: Library for interracting with bash session
+ (no description was found)
+ .
+ This description was automagically extracted from the module by dh-make-perl.
