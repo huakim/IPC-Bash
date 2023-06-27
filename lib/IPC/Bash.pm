@@ -377,7 +377,7 @@ string_ending_delimiter
             ret:
             push @list, ' )';
             ret1:
-            return join('', @list);
+            return CORE::join('', @list);
         } else {
             if ($type =~ /a/){
                 push @list, '-a ', $name, '=(';
