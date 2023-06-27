@@ -21,6 +21,7 @@ package IPC::Bash;
     use Mutex;
     use threads;
     use Symbol;
+    use B;
     use MooseX::Privacy;  
     use IPC::Open3;
     use POSIX  qw(mkfifo);
@@ -349,6 +350,52 @@ string_ending_delimiter
         CORE::close $handle2;
         return $data;
     };
+    
+    sub bash_format{
+        my ($name, $value, $type) = @_;
+        # check type 
+        die "class method invoked on object" if ref $name;
+        
+        my $subr;
+        my @list=('typeset ');
+        my $is_int = $type =~ /i/; 
+        
+        if ($is_int){
+            push @list, '-i ';
+            $subr = sub{
+                return 0 + $_[0];
+            }
+        } else {
+            $subr = \&B::cstring;
+        }
+
+        if ($type =~ /A/){
+            push @list, '-A ', $name, '=(';
+            while (my ($k, $v) = each (%$value)){
+                push @list, ' [', B::cstring("$k"), ']=', &$subr("$v");
+            }
+            ret:
+            push @list, ' )';
+            ret1:
+            return join('', @list);
+        } else {
+            if ($type =~ /a/){
+                push @list, '-a ', $name, '=(';
+                for my $v (@$value){
+                    push @list, ' ', &$subr("$v");
+                }
+                goto ret;
+            } else {
+                push @list, $name, '=', &$subr("$value");
+                goto ret1;
+            }
+        }
+    }
+    
+    sub setvar {
+        my ($self, $name, $value, $type) = @_;
+        return $self->runcmd(bash_format($name, $value, $type));   
+    }
 
     sub BUILDARGS{
         shift;
@@ -415,6 +462,9 @@ Little code snippet.
 
 =head2 getvar(I<name>)
     get variable value
+    
+=head2 setvar(I<name> I<value> I<type>)
+    set variable by name of type
 
 =head2 key()
     get module key for accessing hidden functions
