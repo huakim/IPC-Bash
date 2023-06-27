@@ -16,8 +16,7 @@ Version 0.01
 
 our $VERSION = '0.01';
 
-
-package Bash;
+package IPC::Bash;
     use Moose;
     use Mutex;
     use threads;
@@ -40,157 +39,191 @@ package Bash;
     $sk =~ s/\s+//g;
     $sk .= '_';
     
-    my $BASH_PROGRAM = <<"string_ending_delimiter";
+    my $BASH_PROGRAM = <<'string_ending_delimiter';
+skb_input="${skb_temp}/output.sock"
+skb_output="${skb_temp}/input.sock"
+skb_tempfile="${skb_temp}/tempfile.tmp"
 
-${sk}input="\${${sk}temp}/output.sock"
-${sk}output="\${${sk}temp}/input.sock"
-${sk}tempfile="\${${sk}temp}/tempfile.tmp"
-
-${sk}send(){
-    echo "\$1" > \${${sk}input}
+skb_send(){
+    echo "$1" > ${skb_input}
 }
 
-${sk}recv(){
-    echo `cat \${${sk}output}`
+skb_recv(){
+    echo $(cat ${skb_output})
 }
 
 
-${sk}vartype() {
-    local var=\$( declare -p \${1} 2>- || echo '' )
+skb_cnt() {  
+    if [ "$1" ] &&         
+       [ "$2" ] &&         
+       [ -z "${1##*"$2"*}" ]; 
+        then  return 0;                                    
+        else  return 1;                                          
+    fi;
+}
 
-    if [ -z "\${var}" ]; then
-        echo "UNDEF"
-    else 
-        local reg='^declare -n [^=]+=\"([^\"]+)\"\$'
-        while [[ \$var =~ \$reg ]]; do
-            var=\$( declare -p \${BASH_REMATCH[1]} )
-        done
+skb_allvars(){
+    typeset -p | sed -n 's/^/{ /; s/$/ ; } 2>\/dev\/null/ ; p';
+    alias 2>/dev/null | sed '/^[[:space:]]*alias/! s/^/alias  /'
+    typeset -f ;
+}
+
+
+skb_vartype(){
+    skb_name="$1";
+
+    if [ -z "${skb_name}" ]; then
+        echo ''
+    else
+        skb_var=$(typeset -p ${skb_name} 2>/dev/null || echo '');
+        if [ -z "${skb_var}" ]; then
+            echo ''
+        else
+            skb_pat='s/\w*\s*=[^.*]\+//;s/\w*//;s/[[:space:]]//g;s/-//2g;p';
+            skb_pad='s/^[^=]*=//p';
+            
+            skb_var="$(echo "${skb_var}" | sed -n "${skb_pat}")";
         
-        case "\${var#declare -}" in
-        a*)
-            echo "ARRAY";;
-        A*)
-            echo "HASH";;
-        i*)
-            echo "INT";;
-        *)
-            echo "OTHER";;
-        esac
+            while [ "\${skb_var}" '=' '-n' ]; do
+                skb_name="$(typeset -p ${skb_name} 2>/dev/null | sed -n "${skb_pad}")";
+                skb_var="$(typeset -p ${skb_name} 2>/dev/null | sed -n "${skb_pat}")";
+            done;
+            if [ -z "${skb_var}" ]; then
+                eval 'echo ${'"${skb_name}"':+-}'
+            else 
+                echo "${skb_var}"
+            fi
+        fi
     fi
 }
 
-${sk}getvar(){
-    local varname="\$1"
-    declare -n value="\${varname}"
-    local vartype="\$(${sk}vartype \${varname})"
-    
-    local str=''
-
-    case \${vartype} in 
-    
-    ARRAY)
-        str='['
-        for i in "\${value[@]}"
-        do
-            str="\${str} \$(printf '"%q",' "\${i}") "
-        done
-        echo "\${str} ]"
-    ;;
-    
-    HASH)
-        printf '{'
-        for i in \${!value[@]} 
-        do
-            printf '"%q" => ' "\${i}"
-            printf '"%q", ' "\${value[\${i}]}"
-        done
-        printf '}'
-    ;;
-    
-    INT)
-        printf "\${value}"
-    ;;
-    
-    OTHER)
-        printf '"%q"' "\${value}"
-    ;;
-    
-    UNDEF)
-        printf undef
-    ;;
-    
-    esac
+skb_getvar(){ 
+    skb_varname="$1";
+    if [ -z "${skb_varname}" ]; then
+        printf 'undef';
+    else
+        skb_vartype="$(skb_vartype ${skb_varname})";
+        if [ -z "${skb_vartype}" ]; then
+            printf 'undef';
+        else
+            if skb_cnt "${skb_vartype}" 'i'; then
+                skb_f='%d';
+            else 
+                skb_f='"%q"';
+            fi;
+            skb_Q='"%q" => '
+            if skb_cnt "${skb_vartype}" 'a'; then
+                printf '[';
+                eval  '
+                for skb_i in "${'"${skb_varname}"'[@]}";
+                do
+                    printf "${skb_f}," "${skb_i}";
+                done;
+                ' 
+                printf ']';
+            else
+                if skb_cnt "${skb_vartype}" 'A'; then
+                    printf '{';
+                    eval '
+                    for skb_i in "${!'"${skb_varname}"'[@]}"; 
+                    do
+                        printf "${skb_Q}" "${skb_i}";
+                        printf "${skb_f}," "${'"${skb_varname}"'[${skb_i}]}";
+                    done;
+                    ' 
+                    printf '}';
+                else
+                    eval 'printf "${skb_f}" $'"${skb_varname}";
+                fi;
+            fi;
+        fi;
+    fi
 }
 
-${sk}sendvar(){
-    b="\${1}"
-    c=\$(${sk}getvar "\${b}")
-    ${sk}sendarg "\${c}"
+
+skb_sendvar(){
+    skb_b="${1}"
+    skb_c=$(skb_getvar "${skb_b}")
+    skb_sendarg "${skb_c}"
 }
 
-${sk}sendarg(){
-    export ${sk}name="\$1"
+skb_sendarg(){
+    export skb_RETURN="${1}"
 }
 
-${sk}exit(){
-    kill -9 \$\$
+skb_exit(){
+    echo "exit" > "${skb_tempfile}"
+    exit
 }
 
-${sk}allvars(){
-    declare -p | sed  's/^/{ /' | sed 's/\$/ ; } 2>\\&-/';
-    alias;
-    declare -f;
+skb_fork(){
+    skb_allvars
+    echo skb_send '0'
+    echo skb_main
 }
 
-${sk}fork(){
-    ${sk}allvars
-    echo ${sk}send '0'
-    echo ${sk}main
+skb_subsh(){
+    $0 -c "$(skb_fork)"
 }
 
-${sk}subsh(){
-    bash -c "\$(${sk}fork)"
+skb_sudo(){
+    sudo $0 -c "$(skb_fork)"
 }
 
-${sk}sudo(){
-    sudo bash -c "\$(${sk}fork)"
-}
-
-${sk}sendexec(){
-    c=\$1
-    if [[ \$(command -v \${c}) != "" ]]; then
+skb_sendexec(){
+    skb_c=$1
+    if [ "$(command -v ${skb_c})" '!=' "" ] ; then
         shift
-        c=\$(\${c} "\${@}")
+        skb_c=$(${skb_c} "${@}")
     else 
-        c=""
+        skb_c=""
     fi
-    ${sk}sendarg "\${c}"
+    skb_sendarg "${skb_c}"
 }
 
-${sk}main(){
-    while [[ 1 ]]; do
+skb_getcmd(){
+    skb_c="$(eval "$(echo "${@}")")"
+    skb_sendarg "${skb_c}"
+}
+
+skb_main(){
+    while true; do
     (
-        while [[ 1 ]]; do
-            ${sk}u=`(${sk}recv)`
-            eval "\${${sk}u}"
-            ${sk}send "\${${sk}name}"
-            export ${sk}name='0'
+        while true; do
+            skb_u="$(skb_recv)"
+            eval "${skb_u}" 
+            skb_send "${skb_RETURN}"
+            export skb_RETURN='0'
         done
     )
-        ${sk}send "\${${sk}name}"
+    
+        if [  -e "${skb_tempfile}" ]; then
+            skb_TEMP="$(cat "${skb_tempfile}")"
+            rm "${skb_tempfile}"
+            eval "${skb_TEMP}"
+        fi
+        
+        skb_send "${skb_RETURN}"
     done
 }
-unset BASH_EXECUTION_STRING;
-${sk}main
+unset BASH_EXECUTION_STRING 2>/dev/null
+skb_main
 
 string_ending_delimiter
 
-    for (qw(temp pid input output thread lockcmd)){
+  #  my $bash = $BASH_PROGRAM ;
+  #  $bash =~ s/skb_//ig;
+  #  print ($bash);
+    
+    $BASH_PROGRAM =~ s/skb_/$sk/ig;
+
+
+    for (qw(temp pid input output bash thread lockcmd)){
         has $_ => (
             is => 'rw',
             traits => ['Private'],
         );
-    };
+    }
     
     sub key{
         return $sk;
@@ -201,7 +234,7 @@ string_ending_delimiter
     }
     
     sub getvar{
-        return eval($_[0]->runcmd($sk . 'sendvar ' . $_[1]));
+        return eval($_[0]->runcmd($sk . 'sendvar \'' . $_[1] . '\''));
     }
     
     sub subsh{
@@ -216,8 +249,16 @@ string_ending_delimiter
         return $_[0]->thread->join;
     }
     
+    sub getallvars{
+        return $_[0]->execfunc($sk . 'allvars');
+    }
+    
     sub execfunc{
-        return $_[0]->runcmd($sk . 'sendexec ' . $_[1]);        
+        return $_[0]->runcmd($sk . 'sendexec \'' . $_[1] . '\'');        
+    }
+    
+    sub getcmd{
+        return $_[0]->runcmd($sk . 'getcmd \'' . $_[1] . '\'');        
     }
     
     private_method flush => sub{
@@ -247,9 +288,10 @@ string_ending_delimiter
             mkfifo($self->input, 0777);
             mkfifo($self->output, 0777);
             my $name = $self->temp;
+            my $bash = $self->bash;
             my $pid = open3('<STDIN', '>&STDOUT', '>&STDERR',
                 'env', "${sk}temp=$name", 
-                'bash', '-c', $BASH_PROGRAM);
+                $bash, '-c', $BASH_PROGRAM);
             my $th = threads->create(
             sub{
                 waitpid $pid, 0;
@@ -261,19 +303,28 @@ string_ending_delimiter
         } 
     };
     
+    sub init{
+        my $self = shift;
+        my $mutex = $self->lockcmd();
+        $mutex->lock();
+        $self->open();
+        $mutex->unlock();
+        
+    }
+    
     sub runcmd{
         my $self = shift;
         my $data = shift;
-        my $mutex = $self->lockcmd;
+        my $mutex = $self->lockcmd();
         
-        $mutex->lock;
+        $mutex->lock();
         
-        $self->open;
+        $self->open();
         $self->send ($data);
         
-        $data = $self->recv;
+        $data = $self->recv();
         
-        $mutex->unlock;
+        $mutex->unlock();
         
         return $data;
     }
@@ -299,7 +350,19 @@ string_ending_delimiter
         return $data;
     };
 
-
+    sub BUILDARGS{
+        shift;
+        my $temp = mkdtemp(catfile(get_user_tempdir(), ${sk}."XXXXXXXX"));
+        return {
+        'bash', 'bash',
+        @_,
+        'temp', $temp,
+        'input', catfile($temp, 'input.sock'), 
+        'output', catfile($temp, 'output.sock'),
+        'lockcmd', Mutex->new,
+        };
+    }
+    
 =head1 SYNOPSIS
 
 This module will span an bash session
@@ -308,7 +371,35 @@ Little code snippet.
 
     use IPC::Bash;
 
-    my $foo = IPC::Bash->new();
+
+    use Data::Dumper;
+    srand();
+    my @arr=('ksh', 'zsh', 'bash');
+    
+    my $var = IPC::Bash->new('bash' => $arr[rand @arr]);
+    $var->init();
+    
+    $var->runcmd('typeset -i fin=33');
+    $var->runcmd('typeset -p fin');
+    $var->runcmd($var->key() . 'vartype fin');
+    $var->runcmd('echo $$');
+    $var->runcmd('echo $0');
+    $var->subsh();
+    $var->sudo();
+    $var->runcmd('echo $$');
+    my $sudouser = $var->getvar('SUDO_USER');
+    $var->exit();
+    $var->runcmd('echo $$');
+    print Dumper($sudouser);
+    
+    if (defined $sudouser){
+        $var->exit();
+        $var->runcmd('echo $$');
+    }
+    
+    print Dumper($var->getvar('fin'));
+    $var->close();
+
     ...
 
 =head1 SUBROUTINES/METHODS
@@ -326,7 +417,7 @@ Little code snippet.
     get variable value
 
 =head2 key()
-    get subshell key
+    get module key for accessing hidden functions
     
 =head2 join()
     wait until session closed
@@ -340,23 +431,14 @@ Little code snippet.
 =head2 runcmd(I<str>)
     run session command
     
+=head2 getcmd(I<str>)
+    run session command and get output
+    
+=head2 getallvars()
+    run shell state
+    
 =head2 
 =cut
-
-
-    sub BUILDARGS{
-        my $temp =  mkdtemp(catfile(get_user_tempdir(), ${sk}."XXXXXXXX"));
-        my $input = catfile($temp, 'input.sock');
-        my $output = catfile($temp, 'output.sock');
-        return {
-            'temp', $temp,
-            'input', $input,
-            'output', $output,
-            'lockcmd', Mutex->new,
-        };
-    }
-    1;
-
 
 =head1 AUTHOR
 
@@ -412,3 +494,4 @@ This is free software, licensed under:
 =cut
 
 1; # End of IPC::Bash
+
