@@ -21,10 +21,10 @@ package IPC::Bash;
     use Mutex;
     use threads;
     use Symbol;
-    use B;
     use MooseX::Privacy;  
     use IPC::Open3;
     use POSIX  qw(mkfifo);
+    use Cwd qw(abs_path);
     use File::Temp qw(tempdir :mktemp);
     use File::Spec::Functions;  
     use File::Util::Tempdir qw(get_tempdir get_user_tempdir);
@@ -310,7 +310,12 @@ string_ending_delimiter
         $mutex->lock();
         $self->open();
         $mutex->unlock();
-        
+    }
+
+    sub source{
+        my ($self, $path) = @_;
+        $path = bstring(abs_path($path));
+        $self->runcmd(". $path");
     }
     
     sub runcmd{
@@ -350,7 +355,9 @@ string_ending_delimiter
         CORE::close $handle2;
         return $data;
     };
-    
+
+    sub bstring{ my $k = $_[0]; $k = "$k"; $k =~ s/'/'"'"'/g; $k =~ s/\t/'"\\t"'/g; $k =~ s/\n/'"\\n"'/g; $k =~ s/\f/'"\\f"'/g; return "'$k'"; }
+
     sub bash_format{
         my ($name, $value, $type) = @_;
         # check type 
@@ -366,13 +373,14 @@ string_ending_delimiter
                 return 0 + $_[0];
             }
         } else {
-            $subr = \&B::cstring;
+            $subr = &bstring;
         }
+
 
         if ($type =~ /A/){
             push @list, '-A ', $name, '=(';
             while (my ($k, $v) = each (%$value)){
-                push @list, ' [', B::cstring("$k"), ']=', &$subr("$v");
+                push @list, ' [', bstring($k), ']=', &$subr("$v");
             }
             ret:
             push @list, ' )';
@@ -471,7 +479,13 @@ Little code snippet.
     
 =head2 join()
     wait until session closed
+
+=head2 static bstring(name)
+    convert string to bash string implementation
     
+=head2 source(name)
+    execute 'source' command
+
 =head2 execfunc(I<name>)
     get function output
     
