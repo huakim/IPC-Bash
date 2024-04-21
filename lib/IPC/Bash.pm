@@ -360,9 +360,6 @@ string_ending_delimiter
 
     sub bash_format{
         my ($name, $value, $type) = @_;
-        # check type 
-        die "class method invoked on object" if ref $name;
-        
         my $subr;
         my @list=('typeset ');
         my $is_int = $type =~ /i/; 
@@ -373,28 +370,48 @@ string_ending_delimiter
                 return 0 + $_[0];
             }
         } else {
-            $subr = &bstring;
+            $subr = sub{
+                return bstring(shift);
+            }
         }
-
 
         if ($type =~ /A/){
             push @list, '-A ', $name, '=(';
-            while (my ($k, $v) = each (%$value)){
-                push @list, ' [', bstring($k), ']=', &$subr("$v");
+            if (ref($value) eq 'HASH'){
+                while (my ($k, $v) = each (%$value)){
+                    push @list, ' [', bstring($k), ']=', &$subr($v);
+                }
+            } elsif (ref($value) eq 'ARRAY'){
+                my $k = 0;
+                for my $v (@$value){
+                    push @list, ' [', bstring($k), ']=', &$subr($v);
+                    $k ++;
+                }
+            } else {
+                push @list, " ['0']=", &$subr($value);
             }
             ret:
             push @list, ' )';
             ret1:
             return CORE::join('', @list);
         } else {
+            my @value1;
             if ($type =~ /a/){
                 push @list, '-a ', $name, '=(';
-                for my $v (@$value){
-                    push @list, ' ', &$subr("$v");
+                if (ref($value) eq 'HASH'){
+                    @value1 = %$value;
+                } elsif (ref($value) eq 'ARRAY'){
+                    @value1 = @$value;
+                } else{
+                    @value1 = ($value);
+                }
+                ret2:
+                for my $v (@value1){
+                    push @list, ' ', &$subr($v);
                 }
                 goto ret;
             } else {
-                push @list, $name, '=', &$subr("$value");
+                push @list, $name, '=', &$subr($value);
                 goto ret1;
             }
         }
